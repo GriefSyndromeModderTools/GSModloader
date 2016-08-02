@@ -61,8 +61,8 @@ public:
 	{
 	}
 
-	explicit natRefPointer(T* pObj)
-		: m_pPointer(pObj)
+	explicit natRefPointer(T* ptr)
+		: m_pPointer(ptr)
 	{
 		if (m_pPointer)
 		{
@@ -171,13 +171,6 @@ public:
 private:
 	T* m_pPointer;
 };
-
-/*template <typename T, typename ...Arg>
-NATINLINE natRefPointer<T> make_ref(Arg const&... args)
-{
-	T* pRefObj = new T(args...);
-	return natRefPointer<T>(pRefObj);
-}*/
 
 template <typename T, typename ...Arg>
 NATINLINE natRefPointer<T> make_ref(Arg &&... args)

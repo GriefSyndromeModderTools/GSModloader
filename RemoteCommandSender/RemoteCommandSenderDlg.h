@@ -5,7 +5,8 @@
 #pragma once
 #include "afxcmn.h"
 #include "afxwin.h"
-struct natStream;
+
+#include <natNamedPipe.h>
 
 // CRemoteCommandSenderDlg ¶Ô»°¿ò
 class CRemoteCommandSenderDlg : public CDialogEx
@@ -32,7 +33,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 private:
 	CHandle m_hPipe;
-	natStream* m_pStream;
+	natRefPointer<natNamedPipeClientStream> m_pStream;
 public:
 	afx_msg void OnBnClickedBtnexe();
 	afx_msg void OnBnClickedBtnclose();

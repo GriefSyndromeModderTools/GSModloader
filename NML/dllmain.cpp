@@ -69,104 +69,101 @@ struct Msgdata
 	LPARAM lParam;	///< @brief	lParam
 };
 
-class WndMsgEvent final
-	: public natEvent<Msgdata>
+class SQEventBus final
 {
 public:
-	typedef Sqrat::Function EventHandler;
-
-	explicit WndMsgEvent()
-		: natEvent(true)
+	static SQEventBus& GetInstance()
 	{
+		static SQEventBus s_Instance;
+		return s_Instance;
 	}
 
-	~WndMsgEvent() = default;
-
-	nuInt Register(EventHandler func, DWORD WndMsg, nInt priority = Priority::Normal)
+	template <typename EventClass>
+	std::enable_if_t<std::is_base_of<natEventBase, EventClass>::value, void> RegisterEvent()
 	{
-		auto& vec = m_EventHandler[WndMsg][priority];
-		vec.push_back(func);
-		return vec.size() - 1u;
+		m_EventHandlerMap.try_emplace(typeid(EventClass));
 	}
 
-	nBool Unregister(nuInt HandlerIndex, DWORD WndMsg, nInt Priority)
+	template <typename EventClass, typename EventListener>
+	nuInt RegisterEventListener(EventListener listener, int priority = Priority::Normal)
 	{
-		auto itea = m_EventHandler.find(WndMsg);
-		if (itea != m_EventHandler.end())
+		auto iter = m_EventHandlerMap.find(typeid(EventClass));
+		if (iter == m_EventHandlerMap.end())
 		{
-			auto itea1 = itea->second.find(Priority);
-			if (itea1 != itea->second.end())
+			throw natException(_T(__FUNCTION__), _T("Unregistered event."));
+		}
+
+		auto&& listeners = iter->second[priority];
+		auto ret = listeners.empty() ? 0u : listeners.rbegin()->first + 1u;
+		listeners[ret] = listener;
+		return ret;
+	}
+
+	template <typename EventClass>
+	void UnregisterEventListener(int priority, nuInt Handle)
+	{
+		auto iter = m_EventHandlerMap.find(typeid(EventClass));
+		if (iter == m_EventHandlerMap.end())
+		{
+			throw natException(_T(__FUNCTION__), _T("Unregistered event."));
+		}
+
+		auto listeneriter = iter->second.find(priority);
+		if (listeneriter == iter->second.end())
+		{
+			return;
+		}
+
+		listeneriter->second.erase(Handle);
+	}
+
+	template <typename EventClass>
+	bool Post(EventClass& event)
+	{
+		auto iter = m_EventHandlerMap.find(typeid(EventClass));
+		if (iter == m_EventHandlerMap.end())
+		{
+			throw natException(_T(__FUNCTION__), _T("Unregistered event."));
+		}
+
+		for (auto& listeners : iter->second)
+		{
+			for (auto& listener : listeners.second)
 			{
-				auto& vec = itea1->second;
-				if (HandlerIndex < vec.size())
-				{
-					vec.erase(vec.begin() + HandlerIndex);
-					return true;
-				}
+				listener.second(static_cast<natEventBase&>(event));
 			}
 		}
 
-		return false;
-	}
-
-	void Unregister(DWORD WndMsg, EventHandler Handler)
-	{
-		auto itea = m_EventHandler[WndMsg];
-		for each (auto itea2 in itea)
-		{
-			std::vector<EventHandler>::iterator itea3;
-			while ((itea3 = std::find(itea2.second.begin(), itea2.second.end(), Handler)) != itea2.second.end())
-			{
-				itea2.second.erase(itea3);
-			}
-		}
-	}
-
-	nBool Activate(DWORD WndMsg, nInt PriorityLimitmin = Priority::Low, nInt PriorityLimitmax = Priority::High)
-	{
-		auto i = m_EventHandler.find(WndMsg);
-		if (i == m_EventHandler.end())
-		{
-			return false;
-		}
-
-		for (auto i1 = PriorityLimitmax; i1 <= PriorityLimitmin; ++i1)
-		{
-			for each (auto eh in i->second[i1])
-			{
-				eh.Execute(reinterpret_cast<nuLong>(m_data.hWnd), m_data.uMsg, m_data.wParam, m_data.lParam);
-			}
-		}
-
-		return m_isCanceled;
-	}
-
-	nBool Activate(DWORD WndMsg, dataType const& data, nInt PriorityLimitmin, nInt PriorityLimitmax)
-	{
-		SetData(data);
-		return Activate(WndMsg, PriorityLimitmin, PriorityLimitmax);
-	}
-
-	nBool operator()(DWORD WndMsg, dataType const& data)
-	{
-		return Activate(WndMsg, data, Priority::Low, Priority::High);
-	}
-
-	void Release() override
-	{
-		m_EventHandler.clear();
-		SetCanceled();
+		return event.IsCanceled();
 	}
 
 private:
-	std::unordered_map<DWORD, std::map<nInt, std::vector<EventHandler>>> m_EventHandler;
+	std::unordered_map<std::type_index, std::map<int, std::map<nuInt, Sqrat::Function>>> m_EventHandlerMap;
+
+	SQEventBus() = default;
+	~SQEventBus() = default;
 };
 
-static WndMsgEvent WMEvent;
-
-nuInt sqRegister(Sqrat::Function tFunc, DWORD dwWndMsg, nuInt uPriority)
+class WndMsgEvent final
+	: public natEventBase
 {
-	return WMEvent.Register(tFunc, dwWndMsg, uPriority);
+public:
+	explicit WndMsgEvent(Msgdata WndMsg)
+		: m_WndMsg(WndMsg)
+	{
+	}
+
+	bool CanCancel() const noexcept override
+	{
+		return false;
+	}
+
+	Msgdata m_WndMsg;
+};
+
+nuInt sqRegister(Sqrat::Function tFunc, nuInt uPriority)
+{
+	return SQEventBus::GetInstance().RegisterEventListener<WndMsgEvent>(tFunc, uPriority);
 }
 
 bool sqLoadLibrary(const SQChar* lpDllName);
@@ -442,6 +439,8 @@ public:
 
 	void OnPluginLoad() override
 	{
+		SQEventBus::GetInstance().RegisterEvent<WndMsgEvent>();
+
 		GSPack newPack;
 		if (_access("gs03.dat", 0) == -1)
 		{
@@ -472,23 +471,23 @@ public:
 			{
 				for (auto& itea2 : itea.second)
 				{
-					if (_stricmp(itea2.first.substr(0u, sizeof("assets/") - 1).c_str(), "assets/") == 0)
+					if (_stricmp(itea2.first.substr(0u, sizeof _T("assets/") - 1).c_str(), _T("assets/")) == 0)
 					{
 						std::vector<char>& bugfix = itea2.second;
-						newPack.AddFile(natUtil::FormatString(_T("mods/%s/resource/%s"), itea.first.c_str(), itea2.first.substr(sizeof("assets/") - 1).c_str()), bugfix);
+						newPack.AddFile(natUtil::FormatString(_T("mods/%s/resource/%s"), itea.first.c_str(), itea2.first.substr(sizeof _T("assets/") - 1).c_str()), bugfix);
 					}
 					else
 					{
-						if (ModInfoJson[itea.first].empty() && _stricmp(itea2.first.c_str(), "modinfo.json") == 0)
+						if (ModInfoJson[itea.first].empty() && _stricmp(itea2.first.c_str(), _T("modinfo.json")) == 0)
 						{
-							ModInfoJson[itea.first] = std::move(itea2.second);
+							ModInfoJson[itea.first] = move(itea2.second);
 							continue;
 						}
 
-						std::string ext = itea2.first.substr(itea2.first.find_last_of('.') + 1u);
-						if (_stricmp(ext.c_str(), "nut") == 0 || _stricmp(ext.c_str(), "cv4") == 0)
+						std::string ext = itea2.first.substr(itea2.first.find_last_of(_T('.')) + 1u);
+						if (_stricmp(ext.c_str(), _T("nut")) == 0 || _stricmp(ext.c_str(), _T("cv4")) == 0)
 						{
-							tmpScript[itea.first][itea2.first] = std::move(itea2.second);
+							tmpScript[itea.first][itea2.first] = move(itea2.second);
 						}
 					}
 				}
@@ -655,6 +654,17 @@ static void INJECT_STDCALL InjectSquirrel(LPVOID hSQVM)
 
 	rootTable.Bind(_SC("modloader"), modloader);
 
+	Sqrat::Class<Msgdata, Sqrat::NoConstructor<Msgdata>> sqMsgdata(vm, _SC("WndMsgdata"));
+	sqMsgdata.Var(_SC("hWnd"), &Msgdata::hWnd);
+	sqMsgdata.Var(_SC("uMsg"), &Msgdata::uMsg);
+	sqMsgdata.Var(_SC("wParam"), &Msgdata::wParam);
+	sqMsgdata.Var(_SC("lParam"), &Msgdata::lParam);
+	rootTable.Bind(_SC("WndMsgdata"), sqMsgdata);
+
+	Sqrat::Class<WndMsgEvent, Sqrat::NoConstructor<WndMsgEvent>> sqWndMsgEvent(vm, _SC("WndMsgEvent"));
+	sqWndMsgEvent.Var(_SC("WndMsg"), &WndMsgEvent::m_WndMsg);
+	rootTable.Bind(_SC("WndMsgEvent"), sqWndMsgEvent);
+
 	rootTable.Func(_SC("LoadLibrary"), sqLoadLibrary);
 	rootTable.Func(_SC("ReadModPack"), ReadModPack);
 	rootTable.Func(_SC("GetModPackList"), GetModPackList);
@@ -671,10 +681,12 @@ static void INJECT_STDCALL InjectSquirrel(LPVOID hSQVM)
 }
 static void INJECT_STDCALL InjectedGameWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	WMEvent(uMsg, Msgdata{ hwnd, uMsg, wParam, lParam });
+	WndMsgEvent event(Msgdata { hwnd, uMsg, wParam, lParam });
+	SQEventBus::GetInstance().Post(event);
+
 	if (uMsg == WM_DESTROY)
 	{
-		Sqrat::RootTable().GetFunction("ExitGame").Execute();
+		Sqrat::RootTable().GetFunction(_SC("ExitGame")).Execute();
 	}
 }
 
@@ -748,12 +760,12 @@ static bool CreateGSPackFileList(std::unordered_map<std::string, std::unordered_
 {
 	out.clear();
 	WIN32_FIND_DATA fd;
-	HANDLE hzFile = FindFirstFile("mods\\*.zip", &fd);
+	HANDLE hzFile = FindFirstFile(_T("mods\\*.zip"), &fd);
 	do
 	{
 		std::string DirName(fd.cFileName);
-		auto& ZipFileList = out[DirName.substr(0u, DirName.find_last_of('.'))];
-		if (!GetZipFile((std::string("mods\\") + fd.cFileName).c_str(), ZipFileList))
+		auto& ZipFileList = out[DirName.substr(0u, DirName.find_last_of(_T('.')))];
+		if (!GetZipFile((std::string(_T("mods\\")) + fd.cFileName).c_str(), ZipFileList))
 		{
 			FindClose(hzFile);
 			return false;

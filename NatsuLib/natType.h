@@ -74,9 +74,6 @@ using nUnsafePtr = T*;
 ///	@brief	×´Ì¬Âë
 #define	NATRESULTCODE(code)	((code) & 0xFFFF)
 
-///	@brief	Ê¹min maxºêÊ§Ð§
-#define NOMINMAX			1
-
 ///	@}
 
 ////////////////////////////////////////////////////////////////////////////////

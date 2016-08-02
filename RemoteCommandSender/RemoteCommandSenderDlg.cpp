@@ -7,7 +7,6 @@
 #include "RemoteCommandSenderDlg.h"
 #include "afxdialogex.h"
 #include <natUtil.h>
-#include <natStream.h>
 #include <natException.h>
 
 #include "resource.h"
@@ -63,21 +62,20 @@ BOOL CRemoteCommandSenderDlg::OnInitDialog()
 		strPipeName = argv[1];
 	}
 
-	if (!WaitNamedPipe(strPipeName, NMPWAIT_WAIT_FOREVER))
+	try
+	{
+		m_pStream = make_ref<natNamedPipeClientStream>(strPipeName, false, true);
+	}
+	catch (natException& e)
+	{
+		MessageBox(natUtil::FormatString(_T("Failed to open pipe. In %s, description: %s, lasterr=%d"), e.GetSource(), e.GetDesc(), GetLastError()).c_str(), _T("Error"), MB_ICONERROR);
+	}
+
+	if (NATFAIL(m_pStream->Wait()))
 	{
 		MessageBox(natUtil::FormatString(_T("Cannot connect to pipe. LastErr=%d"), GetLastError()).c_str(), _T("Error"), MB_ICONERROR);
 		DestroyWindow();
 		return TRUE;
-	}
-
-	try
-	{
-		m_pStream = new natFileStream(strPipeName, false, true);
-	}
-	catch (natException& e)
-	{
-		SafeRelease(m_pStream);
-		MessageBox(natUtil::FormatString(_T("Failed to open pipe. In %s, description: %s, lasterr=%d"), e.GetSource(), e.GetDesc(), GetLastError()).c_str(), _T("Error"), MB_ICONERROR);
 	}
 
 	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
@@ -168,8 +166,6 @@ void CRemoteCommandSenderDlg::OnDestroy()
 	nLen tLen = strlen(tExitCommand);
 	m_pStream->WriteBytes(reinterpret_cast<ncData>(&tLen), sizeof(nLen));
 	m_pStream->WriteBytes(ncData(tExitCommand), tLen);
-
-	SafeRelease(m_pStream);
 }
 
 
@@ -179,17 +175,15 @@ void CRemoteCommandSenderDlg::OnDropFiles(HDROP hDropInfo)
 	nTChar lpPath[MAX_PATH + 1] = _T("");
 	DragQueryFile(hDropInfo, 0, lpPath, MAX_PATH + 1);
 
-	natStream* pStream = new natFileStream(lpPath, true, false);
+	natRefPointer<natStream> pStream = make_ref<natFileStream>(lpPath, true, false);
 	nLen tLen = pStream->GetSize();
-	nStr lpData = new nChar[static_cast<nuInt>(tLen + 1)];
-	lpData[tLen] = 0;
-	if (pStream->ReadBytes(reinterpret_cast<nData>(lpData), tLen) == tLen && pStream->GetLastErr() == NatErr_OK)
+	std::vector<nChar> Data(static_cast<nuInt>(tLen + 1));
+	Data.back() = 0;
+	if (pStream->ReadBytes(reinterpret_cast<nData>(Data.data()), tLen) == tLen && pStream->GetLastErr() == NatErr_OK)
 	{
-		m_StrCode = lpData;
+		m_StrCode = Data.data();
 		UpdateData(FALSE);
 	}
-	SafeDelArr(lpData);
-	pStream->Release();
 
 	DragFinish(hDropInfo);
 	

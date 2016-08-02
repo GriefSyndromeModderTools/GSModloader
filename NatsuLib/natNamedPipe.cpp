@@ -117,6 +117,11 @@ nLen natNamedPipeServerStream::WriteBytes(ncData pData, nLen Length)
 	return tWriteBytes;
 }
 
+void natNamedPipeServerStream::Flush()
+{
+	FlushFileBuffers(m_hPipe);
+}
+
 void natNamedPipeServerStream::Lock()
 {
 	m_Section.Lock();
@@ -258,6 +263,11 @@ nLen natNamedPipeClientStream::WriteBytes(ncData pData, nLen Length)
 	return ret;
 }
 
+void natNamedPipeClientStream::Flush()
+{
+	m_InternalStream->Flush();
+}
+
 void natNamedPipeClientStream::Lock()
 {
 	m_InternalStream->Lock();
@@ -273,14 +283,14 @@ void natNamedPipeClientStream::Unlock()
 	m_InternalStream->Unlock();
 }
 
-nResult natNamedPipeClientStream::Wait()
+nResult natNamedPipeClientStream::Wait(nuInt timeOut)
 {
 	if (m_InternalStream)
 	{
 		return m_LastErr = NatErr_IllegalState;
 	}
 
-	if (!WaitNamedPipe(m_PipeName.c_str(), NMPWAIT_WAIT_FOREVER))
+	if (!WaitNamedPipe(m_PipeName.c_str(), timeOut == Infinity ? NMPWAIT_WAIT_FOREVER : timeOut))
 	{
 		return m_LastErr = NatErr_InternalErr;
 	}

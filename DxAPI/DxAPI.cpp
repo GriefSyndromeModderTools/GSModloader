@@ -6,6 +6,17 @@
 #include <d3d9.h>
 #include <d3dx9core.h>
 #include <tchar.h>
+#include <string>
+#include <natRefObj.h>
+#include <vector>
+#include <sqrat.h>
+#include <memory>
+
+namespace
+{
+	int sqCreateFont(nuInt Height, nuInt Width, nuInt Weight, nuInt MipLevels, nBool Italic, nuInt CharSet, nuInt OutputPrecision, nuInt Quality, nuInt PitchAndFamily, std::string const& pFaceName);
+	int sqDrawText(nuInt font, std::string const& str, nuInt top, nuInt left, nuInt width, nuInt height, nuInt format, nuInt color);
+}
 
 class DxAPI
 	: public NativeLibrary
@@ -21,27 +32,21 @@ public:
 
 	void Exit() override
 	{
-		font->Release();
 	}
 
-	void GetSQVM(SQVM* /*vm*/) override
+	void GetSQVM(nUnsafePtr<SQVM> vm) override
 	{
+		Sqrat::DefaultVM::Set(vm);
+
+		Sqrat::Table modloadertable(Sqrat::RootTable().GetSlot(_SC("modloader")).Cast<Sqrat::Table>());
+		modloadertable.Func(_SC("CreateFont"), sqCreateFont);
+		modloadertable.Func(_SC("DrawText"), sqDrawText);
 	}
 
-	void GetDxInterface(IDirect3D9* pDx9, IDirect3DDevice9* pDxDevice) override
+	void GetDxInterface(nUnsafePtr<IDirect3D9> pDx9, nUnsafePtr<IDirect3DDevice9> pDxDevice) override
 	{
 		m_pDx9 = pDx9;
 		m_pDxDevice = pDxDevice;
-
-		ZeroMemory(&lf, sizeof(D3DXFONT_DESCA));
-		lf.Height = 24;
-		lf.Width = 10;
-		lf.Weight = 10;
-		lf.Italic = false;
-		lf.CharSet = DEFAULT_CHARSET;
-		lstrcpy(lf.FaceName, _T("Î¢ÈíÑÅºÚ"));
-
-		D3DXCreateFontIndirect(m_pDxDevice, &lf, &font);
 	}
 
 	bool HandlePresent() override
@@ -51,23 +56,30 @@ public:
 
 	void PrePresent() override
 	{
-		TCHAR strText[] = _T("Acaly and Natsu's Modloader Test");
-		RECT myrect;
-		myrect.top = 150;
-		myrect.left = 0;
-		myrect.right = 500 + myrect.left;
-		myrect.bottom = 100 + myrect.top;
 		m_pDxDevice->BeginScene();
 
-		font->DrawText(
-			NULL,
-			strText,
-			sizeof strText - 1,
-			&myrect,
-			DT_TOP | DT_LEFT,
-			D3DCOLOR_ARGB(255, 255, 255, 0));
+		/* codes here */
 
 		m_pDxDevice->EndScene();
+	}
+
+	int DxCreateFont(nuInt Height, nuInt Width, nuInt Weight, nuInt MipLevels, nBool Italic, nuInt CharSet, nuInt OutputPrecision, nuInt Quality, nuInt PitchAndFamily, std::string const& pFaceName)
+	{
+		natRefPointer<ID3DXFont> font;
+		D3DXCreateFont(m_pDxDevice, Height, Width, Weight, MipLevels, Italic, CharSet, OutputPrecision, Quality, PitchAndFamily, pFaceName.c_str(), &font);
+		m_fonts.emplace_back(std::move(font));
+		return m_fonts.size() - 1;
+	}
+
+	int DxDrawString(nuInt font, std::string const& str, nuInt top, nuInt left, nuInt width, nuInt height, nuInt format, nuInt color)
+	{
+		if (font >= m_fonts.size())
+		{
+			return -1;
+		}
+
+		RECT rect{ top, left, left + width, top + height };
+		return m_fonts[font]->DrawText(NULL, str.c_str(), str.size(), std::addressof(rect), format, color);
 	}
 
 	static DxAPI& GetInstance()
@@ -77,21 +89,33 @@ public:
 	}
 
 private:
-	IDirect3D9* m_pDx9;
-	IDirect3DDevice9* m_pDxDevice;
+	nUnsafePtr<IDirect3D9> m_pDx9;
+	nUnsafePtr<IDirect3DDevice9> m_pDxDevice;
 
-	D3DXFONT_DESCA lf;
-	ID3DXFont* font;
+	std::vector<natRefPointer<ID3DXFont>> m_fonts;
 };
 
-int GetNativeLibraryInstance(NativeLibrary** ppLib)
+namespace
+{
+	int sqCreateFont(nuInt Height, nuInt Width, nuInt Weight, nuInt MipLevels, nBool Italic, nuInt CharSet, nuInt OutputPrecision, nuInt Quality, nuInt PitchAndFamily, std::string const& pFaceName)
+	{
+		return DxAPI::GetInstance().DxCreateFont(Height, Width, Weight, MipLevels, Italic, CharSet, OutputPrecision, Quality, PitchAndFamily, pFaceName);
+	}
+
+	int sqDrawText(nuInt font, std::string const& str, nuInt top, nuInt left, nuInt width, nuInt height, nuInt format, nuInt color)
+	{
+		return DxAPI::GetInstance().DxDrawString(font, str, top, left, width, height, format, color);
+	}
+}
+
+int GetNativeLibraryInstance(nUnsafePtr<nUnsafePtr<NativeLibrary>> ppLib)
 {
 	if (ppLib == nullptr)
 	{
 		return -1;
 	}
-
-	*ppLib = &DxAPI::GetInstance();
+	
+	*ppLib = std::addressof(DxAPI::GetInstance());
 
 	return 0;
 }

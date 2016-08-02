@@ -2,6 +2,11 @@
 #include "natStream.h"
 #include <future>
 
+#pragma push_macro("max")
+#ifdef max
+#	undef max
+#endif
+
 enum class PipeDirection
 {
 	In = 1,
@@ -82,6 +87,7 @@ public:
 
 	nLen ReadBytes(nData pData, nLen Length) override;
 	nLen WriteBytes(ncData pData, nLen Length) override;
+	void Flush() override;
 	void Lock() override;
 	nResult TryLock() override;
 	void Unlock() override;
@@ -115,6 +121,11 @@ class natNamedPipeClientStream
 	: public natRefObjImpl<natStream>
 {
 public:
+	enum TimeOut : nuInt
+	{
+		Infinity = static_cast<nuInt>(-1),
+	};
+
 	natNamedPipeClientStream(ncTStr Pipename, nBool bReadable, nBool bWritable);
 	~natNamedPipeClientStream() = default;
 
@@ -153,11 +164,12 @@ public:
 	nBool CanRead() const override;
 	nLen ReadBytes(nData pData, nLen Length) override;
 	nLen WriteBytes(ncData pData, nLen Length) override;
+	void Flush() override;
 	void Lock() override;
 	nResult TryLock() override;
 	void Unlock() override;
 
-	nResult Wait();
+	nResult Wait(nuInt timeOut = Infinity);
 
 private:
 	std::unique_ptr<natFileStream> m_InternalStream;
@@ -165,3 +177,5 @@ private:
 	nTString m_PipeName;
 	nBool m_bReadable, m_bWritable;
 };
+
+#pragma pop_macro("max")
